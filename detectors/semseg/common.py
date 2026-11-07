@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 IGNORE = 255
+IMAGENET_MEAN, IMAGENET_STD = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
 
 
 class SemStats:
@@ -36,7 +37,11 @@ class SemSegBase(nn.Module):
         self.stats = SemStats()
         self.yolo_layers = [self.stats]
 
+    imagenet_norm = False          # [Unified] vseg01: True for the ImageNet-initialised variants (models.py *_in)
+
     def forward(self, x, targets=None):
+        if self.imagenet_norm:     # input stays 0..1 RGB for every model; ImageNet weights expect mean / std
+            x = (x - x.new_tensor(IMAGENET_MEAN).view(1, 3, 1, 1)) / x.new_tensor(IMAGENET_STD).view(1, 3, 1, 1)
         main, aux = self.logits(x)
         if targets is None:
             return main

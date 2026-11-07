@@ -18,6 +18,7 @@ not used. Boxes follow the same affine transform; boxes left with less than 25 %
 (or narrower than 2 px) after clipping are dropped.
 """
 
+import os
 
 import cv2
 import numpy as np
@@ -25,17 +26,26 @@ import torch
 from PIL import Image
 
 
-def letterbox_params(w, h, size):
-    scale = min(size / w, size / h)
+# [Unified] MOT stage (2026-10-22): optional wide canvas. UNIFIED_IMAGE_H=384 with --img-size 1216 letterboxes into
+# 1216 x 384 (W x H). Targets are then normalised by the canvas HEIGHT on both axes (cx, w may exceed 1), because
+# the detectors turn targets back into pixels with split_targets(targets, B, x.shape[2]) = x input height.
+# Unset (default) -> square canvas, identical to before.
+CANVAS_H = int(os.environ["UNIFIED_IMAGE_H"]) if os.environ.get("UNIFIED_IMAGE_H") else None
+
+
+def letterbox_params(w, h, size, size_h=None):
+    sh = size_h or CANVAS_H or size
+    scale = min(size / w, sh / h)
     rw, rh = int(round(w * scale)), int(round(h * scale))
-    return scale, (size - rw) // 2, (size - rh) // 2, rw, rh
+    return scale, (size - rw) // 2, (sh - rh) // 2, rw, rh
 
 
-def letterbox(image, size):
+def letterbox(image, size, size_h=None):
     """PIL RGB -> (letterboxed PIL, scale, pad_x, pad_y). Gray (128) padding, legacy."""
     w, h = image.size
-    scale, px, py, rw, rh = letterbox_params(w, h, size)
-    canvas = Image.new("RGB", (size, size), (128, 128, 128))
+    sh = size_h or CANVAS_H or size
+    scale, px, py, rw, rh = letterbox_params(w, h, size, sh)
+    canvas = Image.new("RGB", (size, sh), (128, 128, 128))
     canvas.paste(image.resize((rw, rh), Image.BILINEAR), (px, py))
     return canvas, scale, px, py
 

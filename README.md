@@ -36,6 +36,8 @@ https://www.nist.gov/itl/products-and-services/emnist-dataset and run
 
 ## Results
 
+> **v1.1 (2026-11-08)** - KITTI-STEP semantic results added (section below, video-segmentation stage of the series) with their weights in Release v1.1. The FL36-Seg results, defaults and Release v1.0 are unchanged.
+
 Test set: FL36-Seg test (1,024 images, 6,699 objects, 36 classes), after 30 epochs (6.1 h on an RTX 4070 Laptop GPU).
 
 | **mIoU (incl. background)** | mIoU (36 object classes) | Pixel accuracy |
@@ -54,6 +56,49 @@ Convergence (test mIoU every 5 epochs):
 Protocol: 30 epochs, Adam lr 1e-4 (constant), effective batch 8 (micro batch 2 x 4 accumulation), input 608, seed 777,
 no pretraining; augmentation: horizontal flip + the basic YOLO-paper augmentation (random scale / translation 20 %,
 HSV hue 0.1, saturation / exposure 1.5); test evaluation every 5 epochs.
+
+## KITTI-STEP (v1.1, video-segmentation stage)
+
+`pspnet_in`: the same PSPNet with a ResNet-50 from the torchvision ImageNet weights (IMAGENET1K_V1), trained on KITTI-STEP semantic labels (19 Cityscapes classes, void ignored) on
+the KITTI tracking images. Split = KITTI-MOTS: train 12 sequences (5,027 frames), test = val 9 sequences (2,981 frames).
+Wide canvas 1216 x 384, 20 epochs, Adam 1e-4, seed 777, the profile augmentation. Protocol difference to the
+FL36-Seg result above: ImageNet backbone instead of training from scratch.
+
+The four semantic models of the stage (same data, protocol and evaluation):
+
+| model | mIoU (19 classes) | pixel accuracy | TC (RAFT) | STQ with Seg2Track | images / s |
+| --- | --- | --- | --- | --- | --- |
+| FCN | 0.566 | 0.912 | 0.739 | 0.560 | 18.5 |
+| PSPNet | 0.563 | 0.915 | 0.740 | 0.556 | 16.3 |
+| DeepLabv3+ | 0.560 | 0.913 | 0.718 | 0.557 | 31.4 |
+| SegFormer-B0 | 0.518 | 0.906 | 0.682 | 0.538 | 51.4 |
+
+- mIoU = KITTI-STEP semantic mIoU over the 19 classes (confusion matrix over the val set). The three ResNet-50 models lie within 0.005 mIoU of each other (single runs, seed 777): treat them as tied.
+- TC = temporal consistency: agreement of consecutive predictions after warping with RAFT-large optical flow
+  (2,972 frame pairs; the ground truth itself scores 0.833). Equal mIoU does not mean equal flicker.
+- STQ = segmentation and tracking quality (deeplab2 definition) of this semantic map combined with Seg2Track-SAM2
+  instances (Cascade R-CNN detections, official threshold).
+
+| Epoch | 5 | 10 | 15 | 20 |
+| --- | --- | --- | --- | --- |
+| mIoU (19) | 0.566 | 0.559 | 0.555 | 0.563 |
+
+Usage (data, then training / evaluation):
+
+```bash
+mkdir -p ~/Physical_AI/datasets/downloads && cd ~/Physical_AI/datasets/downloads
+wget -c https://s3.eu-central-1.amazonaws.com/avg-kitti/data_tracking_image_2.zip     # KITTI tracking images
+wget -c http://storage.googleapis.com/gresearch/tf-deeplab/data/kitti-step.tar.gz      # KITTI-STEP labels
+unzip -q data_tracking_image_2.zip 'training/image_02/*' -d ~/Physical_AI/datasets/KITTI_MOTS
+tar -xzf kitti-step.tar.gz -C ~/Physical_AI/datasets/                                  # -> datasets/kitti-step
+```
+
+```bash
+UNIFIED_SEG_DATASET=kittistep python train_semseg_pspnet_in.py --epochs 20
+UNIFIED_SEG_DATASET=kittistep python evaluate_semseg_pspnet_in.py --weights semseg_pspnet_in_kittistep_e020.pth
+```
+
+Weights: Release v1.1 (`semseg_pspnet_in_kittistep_e020.pth`). KITTI / KITTI-STEP are CC BY-NC-SA 3.0 (non-commercial); the weights inherit it.
 
 ## Usage
 

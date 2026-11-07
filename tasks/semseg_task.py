@@ -9,6 +9,10 @@ argmax -> confusion matrix (void 255 skipped). Reported: mIoU over all K classes
 definition as the "derived semantic mIoU" of the instance models in tasks/seg_task.py), mIoU over the C object
 classes, pixel accuracy. "miou" / "miou_fg" carry {"summary": {"mAP": value}} so the common runner records them
 in the eval curve like detection mAP.
+
+[Unified] vseg01 (2026-10-31): UNIFIED_SEG_DATASET=kittistep reads KITTI-STEP (common/seg/kitti_step.py) on the wide
+canvas spec["img_h"] x img_size (1216 x 384). Background (index 0) has no ground truth there, so "mIoU (objects)" is
+the 19-class KITTI-STEP mIoU. With img_h None (FL36 / VOC) everything is exactly as before.
 """
 
 import time
@@ -31,20 +35,33 @@ class SemSegTask:
     def __init__(self):
         self.spec = C.TASKS["semseg"]
         self.class_names = list(self.spec["classes"])
+        self.img_h = self.spec.get("img_h")
+
+    def _kitti(self, args, split, train):
+        from common.seg.kitti_step import KittiStepSemSeg
+        return KittiStepSemSeg(C.SEG_ROOT, split, args.img_size, self.class_names, train=train,
+                               hflip_prob=C.PROFILE["hflip_prob"] if train else 0.0,
+                               max_samples=args.max_train if train else args.max_test,
+                               aug=C.PROFILE["image_aug"] if train else None, img_h=self.img_h)
 
     def train_set(self, args):
+        if self.spec["dataset"] == "kittistep":
+            return self._kitti(args, self.spec["train_split"], True)
         return VOCSemSeg(C.SEG_ROOT, self.spec["train_split"], args.img_size, self.class_names, train=True,
                          hflip_prob=C.PROFILE["hflip_prob"], max_samples=args.max_train, aug=C.PROFILE["image_aug"])
 
     def test_set(self, args):
+        if self.spec["dataset"] == "kittistep":
+            return self._kitti(args, self.spec["test_split"], False)
         return VOCSemSeg(C.SEG_ROOT, self.spec["test_split"], args.img_size, self.class_names, train=False,
                          max_samples=args.max_test)
 
     @staticmethod
-    def to_original(logits, img_size, w, h):
+    def to_original(logits, img_size, w, h, img_h=None):
         """logits [K, h', w'] over the letterboxed input -> label map [h, w] (numpy int64)."""
-        lg = F.interpolate(logits[None].float(), (img_size, img_size), mode="bilinear", align_corners=False)[0]
-        _, px, py, rw, rh = letterbox_params(w, h, img_size)
+        ih = img_h or img_size
+        lg = F.interpolate(logits[None].float(), (ih, img_size), mode="bilinear", align_corners=False)[0]
+        _, px, py, rw, rh = letterbox_params(w, h, img_size, ih)
         lg = F.interpolate(lg[None, :, py:py + rh, px:px + rw], (h, w), mode="bilinear", align_corners=False)[0]
         return lg.argmax(0).cpu().numpy()
 
@@ -59,7 +76,7 @@ class SemSegTask:
             logits = model(images.to(device, dtype=torch.float32))
             for k, i in enumerate(idx):
                 gt = dataset.labels(i)
-                pred = self.to_original(logits[k], args.img_size, gt.shape[1], gt.shape[0])
+                pred = self.to_original(logits[k], args.img_size, gt.shape[1], gt.shape[0], self.img_h)
                 conf = semantic_confusion(pred, gt, len(self.class_names), conf)
             bar.update()
         bar.close()

@@ -59,7 +59,33 @@ class PSPNet(_PreciseBN, SemSegBase):
 # ---------------------------------------------------------------- SegFormer (NVlabs mix_transformer.py)
 
 
-MODELS = {"pspnet": PSPNet}   # [Release] this repository's model only
+# ---------------------------------------------------------------- ImageNet-initialised variants (vseg01)
+class ImageNetR50:
+    """[Unified] vseg01 (2026-10-31), video segmentation stage on KITTI-STEP: the ResNet-50 backbone starts from the
+    torchvision ImageNet-1k weights (ResNet50_Weights.IMAGENET1K_V1, the original torchvision ResNet-50) as in the
+    papers, and the 0..1 input is normalised with the ImageNet mean / std inside the model (SemSegBase.forward).
+    Everything else (heads, loss, recipe, PreciseBN) is the same as the FL36 models; the head keeps the common init.
+    common/runner.py calls load_imagenet() right after the common initialisation (training only)."""
+
+    imagenet_norm = True
+
+    def backbone_module(self):
+        raise NotImplementedError
+
+    def load_imagenet(self):
+        from torchvision.models import ResNet50_Weights
+        w = ResNet50_Weights.IMAGENET1K_V1
+        sd = {k: v for k, v in w.get_state_dict(progress=True).items() if not k.startswith("fc.")}
+        self.backbone_module().load_state_dict(sd, strict=True)   # dilation changes strides only, not weights
+        return f"torchvision {w} ({len(sd)} tensors, ResNet-50 backbone)"
+
+
+class PSPNetIn(ImageNetR50, PSPNet):
+    def backbone_module(self):
+        return self.backbone
+
+
+MODELS = {"pspnet": PSPNet, "pspnet_in": PSPNetIn}   # [Release] this repository's models only
 
 
 def make_build(name):
